@@ -1,78 +1,95 @@
-def calculate_score(candidate_data: dict, job_data: dict, weights: dict = None) -> dict:
-    """
-    Calculates a match score based on configurable weights.
-    Default weights: Skills 35%, Experience 25%, Education 15%, Projects 15%, Keywords 10%
-    """
-    if weights is None:
-        weights = {
-            "skills": 0.35,
-            "experience": 0.25,
-            "education": 0.15,
-            "projects": 0.15,
-            "keywords": 0.10
-        }
+# backend/services/scorer.py
 
-    # 1. SKILLS SCORE
-    # Compare required skills vs candidate skills
-    required_skills = set(job_data.get("required_skills", []))
-    candidate_skills = set(candidate_data.get("skills", []))
+def calculate_lca_score(candidate_data: dict) -> dict:
+    """Calculates LCA score based on the 100-point weighted model."""
     
-    if len(required_skills) > 0:
-        matched_skills = required_skills.intersection(candidate_skills)
-        skills_score = len(matched_skills) / len(required_skills)
-    else:
-        matched_skills = []
-        skills_score = 0.0
+    skills = set([s.lower() for s in candidate_data.get("skills", [])])
+    text = candidate_data.get("raw_text", "").lower()
+    exp_years = candidate_data.get("experience_years", 0)
 
-    # 2. EXPERIENCE SCORE (Basic logic: 1.0 if they meet the requirement, partial if they are close)
-    required_years = job_data.get("required_experience_years", 0)
-    candidate_years = candidate_data.get("experience_years", 0)
+    # 1. Core LCA & Sustainability Skills (30 points)
+    core_skills = ["lca", "life cycle assessment", "environmental impact assessment", "sustainability reporting"]
+    core_matches = [s for s in core_skills if s in skills or s in text]
+    core_score = (len(core_matches) / len(core_skills)) * 30 if core_matches else 0
+
+    # 2. Tools (SimaPro/openLCA) (20 points)
+    tool_matches = [t for t in ["simapro", "openlca"] if t in skills or t in text]
+    tool_score = 20 if tool_matches else 0
+
+    # 3. Experience (20 points) - Maxes out at 4 years
+    if exp_years >= 4:
+        exp_score = 20
+    else:
+        exp_score = (exp_years / 4) * 20
+
+    # 4. EPD, ISO, Auditing (15 points)
+    std_matches = [s for s in ["epd", "iso 14040", "iso 14044", "environmental auditing"] if s in skills or s in text]
+    std_score = (len(std_matches) / 4) * 15 if std_matches else 0
+
+    # 5. Carbon & GHG (10 points)
+    carbon_matches = [c for c in ["carbon footprinting", "ghg protocol"] if c in skills or c in text]
+    carbon_score = (len(carbon_matches) / 2) * 10 if carbon_matches else 0
+
+    # 6. Education/Projects (5 points)
+    edu_score = 5 if candidate_data.get("education") and candidate_data.get("has_projects") else 2.5
+
+    total_score = core_score + tool_score + exp_score + std_score + carbon_score + edu_score
     
-    if required_years == 0:
-        experience_score = 1.0
-    elif candidate_years >= required_years:
-        experience_score = 1.0
-    else:
-        experience_score = candidate_years / required_years # E.g., 1 year out of 2 = 0.5
-
-    # 3. EDUCATION SCORE (Basic check: Does the text mention a relevant degree?)
-    # For now, we give a score if they have any education extracted
-    education_score = 1.0 if candidate_data.get("education") else 0.0
-
-    # 4. PROJECTS SCORE (Basic check: Do they have projects extracted?)
-    projects_score = 1.0 if candidate_data.get("projects") else 0.0
-
-    # 5. KEYWORDS SCORE (Matches generic keywords from the JD)
-    job_keywords = set(job_data.get("keywords", []))
-    resume_text = candidate_data.get("raw_text", "").lower()
-    
-    if len(job_keywords) > 0:
-        keyword_matches = [kw for kw in job_keywords if kw in resume_text]
-        keywords_score = len(keyword_matches) / len(job_keywords)
-    else:
-        keywords_score = 0.0
-
-    # Calculate Final Weighted Score
-    final_score = (
-        (skills_score * weights["skills"]) +
-        (experience_score * weights["experience"]) +
-        (education_score * weights["education"]) +
-        (projects_score * weights["projects"]) +
-        (keywords_score * weights["keywords"])
-    )
-
-    # Convert to percentage (e.g., 0.85 -> 85%)
-    final_percentage = round(final_score * 100, 2)
-
     return {
-        "total_score": final_percentage,
+        "total_score": round(total_score, 1),
+        "matched_skills": list(set(core_matches + tool_matches + std_matches + carbon_matches)),
+        "missing_skills": [s for s in core_skills + ["simapro"] + std_matches if s not in skills and s not in text][:5],
         "breakdown": {
-            "skills": round(skills_score * 100, 2),
-            "experience": round(experience_score * 100, 2),
-            "education": round(education_score * 100, 2),
-            "projects": round(projects_score * 100, 2),
-            "keywords": round(keywords_score * 100, 2)
-        },
-        "matched_skills": list(matched_skills),
-        "missing_skills": list(required_skills - candidate_skills)
+            "Core Skills": round(core_score, 1),
+            "Tools": round(tool_score, 1),
+            "Experience": round(exp_score, 1),
+            "EPD/ISO/Audit": round(std_score, 1),
+            "Carbon/GHG": round(carbon_score, 1),
+            "Education/Projects": round(edu_score, 1)
+        }
+    }
+
+def calculate_uiux_score(candidate_data: dict) -> dict:
+    """Calculates UI/UX score based on the 100-point weighted model."""
+    
+    skills = set([s.lower() for s in candidate_data.get("skills", [])])
+    text = candidate_data.get("raw_text", "").lower()
+
+    # 1. Figma & Framer (20 points)
+    figma_matches = [t for t in ["figma", "framer"] if t in skills or t in text]
+    figma_score = (len(figma_matches) / 2) * 20 if figma_matches else 0
+
+    # 2. Wireframing & Prototyping (20 points)
+    wire_matches = [t for t in ["wireframing", "prototyping"] if t in skills or t in text]
+    wire_score = (len(wire_matches) / 2) * 20 if wire_matches else 0
+
+    # 3. User Research & Usability (20 points)
+    research_matches = [t for t in ["user research", "usability testing"] if t in skills or t in text]
+    research_score = (len(research_matches) / 2) * 20 if research_matches else 0
+
+    # 4. Responsive & Interaction Design (15 points)
+    design_matches = [t for t in ["responsive design", "interaction design", "user flows"] if t in skills or t in text]
+    design_score = (len(design_matches) / 3) * 15 if design_matches else 0
+
+    # 5. Design Projects/Portfolio (15 points)
+    # We check if 'portfolio' or 'project' is mentioned
+    portfolio_score = 15 if "portfolio" in text or candidate_data.get("has_projects") else 0
+
+    # 6. Education (10 points)
+    edu_score = 10 if candidate_data.get("education") else 0
+
+    total_score = figma_score + wire_score + research_score + design_score + portfolio_score + edu_score
+    
+    return {
+        "total_score": round(total_score, 1),
+        "matched_skills": list(set(figma_matches + wire_matches + research_matches + design_matches)),
+        "missing_skills": [s for s in ["figma", "user research", "prototyping", "wireframing"] if s not in skills and s not in text][:5],
+        "breakdown": {
+            "Figma/Framer": round(figma_score, 1),
+            "Wire/Prototype": round(wire_score, 1),
+            "Research/Testing": round(research_score, 1),
+            "Design/Flows": round(design_score, 1),
+            "Portfolio": round(portfolio_score, 1),
+            "Education": round(edu_score, 1)
+        }
     }

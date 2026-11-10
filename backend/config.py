@@ -3,27 +3,28 @@
 # JD1: Life Cycle Assessment (LCA) Consultant
 JD1_LCA = {
     "title": "LCA Consultant",
-    "required_experience_years": 2, # Using 2-3 years from the JD link
+    "required_experience_years": 4, # Targeting 4-6 years per prompt
     "required_skills": [
-        "lca", "life cycle assessment", "gabi", "simapro", "iso 14040", "iso 14044",
-        "life cycle inventory", "lci", "environmental product declaration", "epd",
-        "sustainability", "environmental", "audit", "benchmarking"
+        "lca", "life cycle assessment", "simapro", "openlca", "environmental auditing",
+        "epd", "environmental product declaration", "iso 14040", "iso 14044", 
+        "carbon footprinting", "ghg protocol", "life cycle inventory", "lci",
+        "environmental impact assessment", "sustainability reporting"
     ],
     "keywords": [
-        "environmental", "sustainability", "data collection", "modelling", "lci", "epd"
+        "sustainability", "environmental", "carbon", "greenhouse gas"
     ]
 }
 
 # JD2: UI/UX Design Internship
 JD2_UIUX = {
     "title": "UI/UX Design Intern",
-    "required_experience_years": 0, # 0-1 years
+    "required_experience_years": 0, # Internship / Fresher
     "required_skills": [
-        "figma", "ui", "ux", "user research", "prototyping", "wireframe", 
-        "responsive design", "user psychology", "human-centred design", "typography",
-        "mockup", "design systems", "visual design"
+        "figma", "framer", "user research", "wireframing", "prototyping",
+        "responsive design", "user flows", "interaction design", 
+        "visual hierarchy", "usability testing", "design systems"
     ],
     "keywords": [
-        "design", "portfolio", "user feedback", "usability", "interface", "collaboration"
+        "ui", "ux", "design", "portfolio", "user experience"
     ]
 }

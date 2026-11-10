@@ -8,20 +8,29 @@ class Candidate(Base):
     filename = Column(String, index=True)
     raw_text = Column(Text)
     
-    # Extracted Data
-    extracted_skills = Column(Text) # Stored as a JSON string
+    extracted_skills = Column(Text) 
     education = Column(Text)
     experience_years = Column(Float, default=0.0)
     
-    # Scoring & Classification
     lca_score = Column(Float, default=0.0)
     uiux_score = Column(Float, default=0.0)
-    classification = Column(String) # e.g., "Strong match for LCA"
+    classification = Column(String) 
+    
+    hr_status = Column(String, default="Pending Review")
+    hr_notes = Column(Text, default="")
 
 class Job(Base):
     __tablename__ = "jobs"
 
     id = Column(Integer, primary_key=True, index=True)
-    title = Column(String, unique=True, index=True)
-    description = Column(Text)
-    required_skills = Column(Text) # Stored as a JSON string
+    title = Column(String, index=True)
+    category = Column(String) 
+    experience_level = Column(String) 
+    location = Column(String)
+    work_type = Column(String) # e.g., Remote, Onsite
+    compensation = Column(String) # e.g., ₹10,000 - ₹15,000/month
+    
+    description = Column(Text) # Role Overview
+    responsibilities = Column(Text) 
+    required_skills = Column(Text) # Stored as comma-separated or JSON
+    preferred_skills = Column(Text)

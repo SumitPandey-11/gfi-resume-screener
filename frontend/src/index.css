@@ -1,8 +1,66 @@
+
+/* stylelint-disable */
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  --font-family: 'Inter', system-ui, -apple-system, sans-serif;
+}
+
+* {
+  outline: none !important;
+  -webkit-tap-highlight-color: transparent;
+}
+
 body {
-  background-color: #F9FAFB;
-  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  background-color: #F4F8F8;
+  font-family: var(--font-family);
+  &::-webkit-scrollbar { display: none; }
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* Smooth scroll and hidden scrollbar for all containers */
+html, body, #root, .main-scroll-container {
+  height: 100%;
+  overflow: hidden;
+}
+
+/* Custom animations */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.4s ease-out forwards;
+}
+
+/* AI Scanner Animation */
+@keyframes scan {
+  0% { top: 0%; opacity: 0; }
+  10% { opacity: 1; }
+  90% { opacity: 1; }
+  100% { top: 100%; opacity: 0; }
+}
+
+.scanner-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, transparent, #2DD4BF, transparent);
+  box-shadow: 0 0 15px 2px #2DD4BF;
+  animation: scan 2s ease-in-out infinite;
+}
+
+@keyframes float {
+  0% { transform: translateY(0px); }
+  50% { transform: translateY(-10px); }
+  100% { transform: translateY(0px); }
+}
+
+.floating-icon {
+  animation: float 3s ease-in-out infinite;
 }
