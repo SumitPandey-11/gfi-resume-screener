@@ -1,41 +1,39 @@
 
 import os
 
+from dotenv import load_dotenv
 from sqlalchemy import create_engine
-from sqlalchemy.orm import declarative_base, sessionmaker
+from sqlalchemy.orm import sessionmaker, declarative_base
 
-# Read DATABASE_URL from environment.
-# Use SQLite locally if DATABASE_URL is not configured.
-DATABASE_URL = os.getenv(
-    "DATABASE_URL",
-    "sqlite:///./resume_screener.db"
-)
+# Load local .env
+load_dotenv()
 
-# Render may provide postgres://, while SQLAlchemy expects
-# postgresql:// for the PostgreSQL dialect.
+DATABASE_URL = os.getenv("DATABASE_URL")
+
+if not DATABASE_URL:
+    raise ValueError("DATABASE_URL environment variable is missing.")
+
+# Use the installed psycopg2 driver for PostgreSQL.
 if DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace(
-        "postgres://", "postgresql://", 1
+        "postgres://", "postgresql+psycopg2://", 1
+    )
+elif DATABASE_URL.startswith("postgresql://"):
+    DATABASE_URL = DATABASE_URL.replace(
+        "postgresql://", "postgresql+psycopg2://", 1
     )
 
-# Configure database engine separately for SQLite and PostgreSQL.
-if DATABASE_URL.startswith("sqlite"):
-    engine = create_engine(
-        DATABASE_URL,
-        connect_args={"check_same_thread": False}
-    )
-else:
-    engine = create_engine(
-        DATABASE_URL,
-        pool_pre_ping=True
-    )
+engine = create_engine(
+    DATABASE_URL,
+    pool_pre_ping=True,
+    pool_recycle=300,
+    connect_args={"connect_timeout": 10},
+)
 
-# Database session
 SessionLocal = sessionmaker(
     autocommit=False,
     autoflush=False,
-    bind=engine
+    bind=engine,
 )
 
-# SQLAlchemy model base
 Base = declarative_base()
