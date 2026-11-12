@@ -2,18 +2,20 @@ import { useState, useEffect } from 'react';
 import axios from 'axios';
 import { BriefcaseBusiness, Plus, Trash2, Eye } from 'lucide-react';
 
+const API_URL = "https://gfi-resume-screener.onrender.com";
+
 export default function JobDescriptions() {
   const [jobs, setJobs] = useState<any[]>([]);
   const [viewingJD, setViewingJD] = useState<any>(null);
   const [isAdding, setIsAdding] = useState(false);
 
-  // Form State
   const [formData, setFormData] = useState({
     title: '', category: 'LCA', description: '', experience_level: 'Fresher (0-1 Year)', required_skills: '', responsibilities: ''
   });
 
   useEffect(() => {
-    axios.get('/jobs').then(res => setJobs(res.data)).catch(() => {
+    axios.get(`${API_URL}/jobs`).then(res => setJobs(res.data)).catch(() => {
+      // Fallback just in case of network error
       setJobs([
         { id: 1, title: "JD1 – Life-Cycle Assessment (LCA) Role", category: "LCA", experience_level: "2-3 Years", description: "The LCA Consultant helps organizations measure environmental impacts across product life cycles.", required_skills: "LCA, SimaPro, ISO 14040", responsibilities: "Data collection, LCA modelling." },
         { id: 2, title: "JD2 – UI/UX Design Internship", category: "UI/UX", experience_level: "Fresher (0-1 Year)", description: "Design intuitive, attractive, and user-friendly digital experiences for the web platform.", required_skills: "Figma, Wireframing, User Research", responsibilities: "UI design, Prototyping." }
@@ -23,7 +25,12 @@ export default function JobDescriptions() {
 
   const handleDelete = (id: number) => {
     if (window.confirm("Are you sure you want to delete this Job Description?")) {
-      setJobs(jobs.filter(j => j.id !== id));
+      axios.delete(`${API_URL}/jobs/${id}`).then(() => {
+        setJobs(jobs.filter(j => j.id !== id));
+      }).catch(() => {
+        // Fallback
+        setJobs(jobs.filter(j => j.id !== id));
+      });
     }
   };
 
@@ -31,11 +38,11 @@ export default function JobDescriptions() {
     if (!formData.title || !formData.description) return alert("Title and Description are required.");
     
     try {
-      await axios.post('/jobs', formData);
-      setJobs([...jobs, { ...formData, id: Date.now() }]);
+      await axios.post(`${API_URL}/jobs`, formData);
+      window.location.reload(); // Quick refresh to get the real IDs from DB
     } catch (e) {
+      // Local fallback for UI testing if API fails
       setJobs([...jobs, { ...formData, id: Date.now() }]);
-    } finally {
       setIsAdding(false);
       setFormData({ title: '', category: 'LCA', description: '', experience_level: 'Fresher (0-1 Year)', required_skills: '', responsibilities: '' });
     }
@@ -44,7 +51,7 @@ export default function JobDescriptions() {
   return (
     <div className="h-full p-6 md:p-8 flex flex-col gap-6 animate-fade-in bg-[#F4F8F8] overflow-y-auto no-scrollbar">
       
-      {/* HEADER - Matches Dashboard */}
+      {/* HEADER */}
       <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-4 shrink-0 mb-2">
         <div>
           <h1 className="text-[22px] font-bold text-[#123C46]">Job Descriptions</h1>

@@ -1,11 +1,14 @@
 import { useState, useEffect } from 'react';
 import axios from 'axios';
 import { Download, FileSpreadsheet, Users, CheckCircle2, AlertCircle } from 'lucide-react';
+
+const API_URL = "https://gfi-resume-screener.onrender.com";
+
 export default function Reports() {
   const [stats, setStats] = useState({ total: 0, strong: 0, manual: 0, shortlisted: 0 });
 
   useEffect(() => {
-    axios.get('/candidates').then(res => {
+    axios.get(`${API_URL}/candidates`).then(res => {
       const candidates = res.data;
       let strong = 0;
       let manual = 0;
@@ -23,7 +26,7 @@ export default function Reports() {
 
   const handleDownloadCSV = () => {
     // This triggers the FastAPI CSV download
-    window.open('/reports/export/csv', '_blank');
+    window.open(`${API_URL}/reports/export/csv`, '_blank');
   };
 
   return (

@@ -3,6 +3,8 @@ import { useParams, useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { ArrowLeft, CheckCircle2, XCircle, User, Briefcase, GraduationCap, Save, FileText, Download } from 'lucide-react';
 
+const API_URL = "https://gfi-resume-screener.onrender.com";
+
 export default function CandidateDetails() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -16,7 +18,7 @@ export default function CandidateDetails() {
   const [notes, setNotes] = useState('');
 
   useEffect(() => {
-    axios.get(`/candidates/${id}`)
+    axios.get(`${API_URL}/candidates/${id}`)
       .then(res => {
         setCandidate(res.data);
         setHrStatus(res.data.hr_status || 'Pending Review');
@@ -33,7 +35,7 @@ export default function CandidateDetails() {
     setSaving(true);
     setSaveMessage('');
     try {
-      await axios.put(`/candidates/${id}/review`, {
+      await axios.put(`${API_URL}/candidates/${id}/review`, {
         hr_status: hrStatus,
         hr_notes: notes
       });
@@ -55,12 +57,10 @@ export default function CandidateDetails() {
     return <div className="h-full flex items-center justify-center text-red-500">Candidate not found.</div>;
   }
 
-  // Determine which role is the primary match
   const isLca = candidate.lca_score > candidate.uiux_score;
   const primaryRole = isLca ? 'LCA Consultant' : 'UI/UX Design Intern';
   const primaryScore = isLca ? candidate.lca_score : candidate.uiux_score;
 
-  // Build the SVG Circular Progress
   const radius = 56;
   const circumference = 2 * Math.PI * radius;
   const strokeDashoffset = circumference - (primaryScore / 100) * circumference;
@@ -113,7 +113,6 @@ export default function CandidateDetails() {
               Top Role: {primaryRole}
             </div>
 
-            {/* Resume Actions */}
             <div className="flex w-full gap-2">
               <button className="flex-1 bg-white border border-[#DCE7E8] text-[#64748B] py-2 rounded-lg text-[12px] font-bold hover:bg-gray-50 transition flex items-center justify-center gap-2">
                 <FileText className="w-4 h-4" /> Preview
@@ -225,7 +224,7 @@ export default function CandidateDetails() {
                 </div>
               </div>
 
-              {/* Missing Skills (Example based on JD) */}
+              {/* Missing Skills */}
               <div>
                 <h4 className="text-[13px] font-bold text-[#DC2626] flex items-center mb-3">
                   <XCircle className="w-4 h-4 mr-2" /> Missing Requirements

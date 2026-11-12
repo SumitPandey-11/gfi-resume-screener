@@ -3,6 +3,8 @@ import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
 import { FileText, Search } from 'lucide-react';
 
+const API_URL = "https://gfi-resume-screener.onrender.com";
+
 export default function Results() {
   const [candidates, setCandidates] = useState<any[]>([]);
   const [activeTab, setActiveTab] = useState<'lca' | 'uiux'>('lca');
@@ -12,7 +14,7 @@ export default function Results() {
   const navigate = useNavigate();
 
   useEffect(() => {
-    axios.get('/candidates').then(res => setCandidates(res.data));
+    axios.get(`${API_URL}/candidates`).then(res => setCandidates(res.data));
   }, []);
 
   // 1. Filter by Search

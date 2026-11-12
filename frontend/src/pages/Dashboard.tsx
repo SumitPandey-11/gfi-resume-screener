@@ -5,6 +5,8 @@ import { useNavigate } from 'react-router-dom';
 import { FileCheck, BriefcaseBusiness, Palette, ClipboardCheck, Layers, ArrowRight } from 'lucide-react';
 import UploadModal from '../components/UploadModal';
 
+const API_URL = "https://gfi-resume-screener.onrender.com";
+
 export default function Dashboard() {
   const [stats, setStats] = useState({ total: 0, lca: 0, uiux: 0, both: 0, manual: 0 });
   const [topCandidates, setTopCandidates] = useState<any[]>([]);
@@ -12,7 +14,7 @@ export default function Dashboard() {
   const navigate = useNavigate();
 
   const fetchDashboardData = () => {
-    axios.get('/candidates').then(res => {
+    axios.get(`${API_URL}/candidates`).then(res => {
       const candidates = res.data;
       let lca = 0, uiux = 0, both = 0, manual = 0;
       
@@ -61,7 +63,7 @@ export default function Dashboard() {
         </button>
       </div>
 
-      {/* 5 KPI CARDS GRID (Changed from 4 to 5) */}
+      {/* 5 KPI CARDS GRID */}
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-4 shrink-0">
         
         <div className="bg-white p-5 rounded-xl border border-[#DCE7E8] shadow-sm flex flex-col justify-between">
@@ -180,7 +182,7 @@ export default function Dashboard() {
 
       </div>
 
-      {/* TOP MATCHED CANDIDATES TABLE (Now with dynamic role scoring) */}
+      {/* TOP MATCHED CANDIDATES TABLE */}
       <div className="bg-white rounded-xl border border-[#DCE7E8] shadow-sm flex flex-col shrink-0">
         <div className="px-6 pt-6 pb-2">
           <h3 className="text-[16px] font-bold text-[#123C46]">Top Matched Candidates</h3>
@@ -198,7 +200,6 @@ export default function Dashboard() {
             </thead>
             <tbody className="divide-y divide-[#DCE7E8]">
               {topCandidates.map((c) => {
-                // Determine the highest matching role dynamically
                 const isLcaStronger = c.lca_score > c.uiux_score;
                 const matchedRole = isLcaStronger ? 'LCA Consultant' : 'UI/UX Intern';
                 const roleScore = isLcaStronger ? c.lca_score : c.uiux_score;
