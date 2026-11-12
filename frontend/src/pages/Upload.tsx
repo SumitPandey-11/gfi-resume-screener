@@ -39,7 +39,7 @@ export default function Upload() {
 
         formData.append("file", uploadFile);
         
-        const res = await axios.post('http://127.0.0.1:8000/analyze-resume', formData, {
+        const res = await axios.post('/analyze-resume', formData, {
           headers: { 'Content-Type': 'multipart/form-data' },
         });
         
@@ -50,7 +50,7 @@ export default function Upload() {
         // If it's a duplicate error (and user hasn't clicked force re-analyze yet)
         if (errorMessage === "This resume has already been processed." && !forceReAnalyze) {
           try {
-            const allRes = await axios.get('http://127.0.0.1:8000/candidates');
+            const allRes = await axios.get('/candidates');
             // Find the first matching filename (without the timestamp)
             const existing = allRes.data.find((c: any) => c.filename.includes(file.name.replace('.pdf', '')));
             

@@ -16,7 +16,7 @@ export default function CandidateDetails() {
   const [notes, setNotes] = useState('');
 
   useEffect(() => {
-    axios.get(`http://127.0.0.1:8000/candidates/${id}`)
+    axios.get(`/candidates/${id}`)
       .then(res => {
         setCandidate(res.data);
         setHrStatus(res.data.hr_status || 'Pending Review');
@@ -33,7 +33,7 @@ export default function CandidateDetails() {
     setSaving(true);
     setSaveMessage('');
     try {
-      await axios.put(`http://127.0.0.1:8000/candidates/${id}/review`, {
+      await axios.put(`/candidates/${id}/review`, {
         hr_status: hrStatus,
         hr_notes: notes
       });

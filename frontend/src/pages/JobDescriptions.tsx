@@ -13,7 +13,7 @@ export default function JobDescriptions() {
   });
 
   useEffect(() => {
-    axios.get('http://127.0.0.1:8000/jobs').then(res => setJobs(res.data)).catch(() => {
+    axios.get('/jobs').then(res => setJobs(res.data)).catch(() => {
       setJobs([
         { id: 1, title: "JD1 – Life-Cycle Assessment (LCA) Role", category: "LCA", experience_level: "2-3 Years", description: "The LCA Consultant helps organizations measure environmental impacts across product life cycles.", required_skills: "LCA, SimaPro, ISO 14040", responsibilities: "Data collection, LCA modelling." },
         { id: 2, title: "JD2 – UI/UX Design Internship", category: "UI/UX", experience_level: "Fresher (0-1 Year)", description: "Design intuitive, attractive, and user-friendly digital experiences for the web platform.", required_skills: "Figma, Wireframing, User Research", responsibilities: "UI design, Prototyping." }
@@ -31,7 +31,7 @@ export default function JobDescriptions() {
     if (!formData.title || !formData.description) return alert("Title and Description are required.");
     
     try {
-      await axios.post('http://127.0.0.1:8000/jobs', formData);
+      await axios.post('/jobs', formData);
       setJobs([...jobs, { ...formData, id: Date.now() }]);
     } catch (e) {
       setJobs([...jobs, { ...formData, id: Date.now() }]);

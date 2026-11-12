@@ -12,7 +12,7 @@ export default function Dashboard() {
   const navigate = useNavigate();
 
   const fetchDashboardData = () => {
-    axios.get('http://127.0.0.1:8000/candidates').then(res => {
+    axios.get('/candidates').then(res => {
       const candidates = res.data;
       let lca = 0, uiux = 0, both = 0, manual = 0;
       

@@ -5,7 +5,7 @@ export default function Reports() {
   const [stats, setStats] = useState({ total: 0, strong: 0, manual: 0, shortlisted: 0 });
 
   useEffect(() => {
-    axios.get('http://127.0.0.1:8000/candidates').then(res => {
+    axios.get('/candidates').then(res => {
       const candidates = res.data;
       let strong = 0;
       let manual = 0;
@@ -23,7 +23,7 @@ export default function Reports() {
 
   const handleDownloadCSV = () => {
     // This triggers the FastAPI CSV download
-    window.open('http://127.0.0.1:8000/reports/export/csv', '_blank');
+    window.open('/reports/export/csv', '_blank');
   };
 
   return (

@@ -1,14 +1,23 @@
-from fastapi import FastAPI, UploadFile, File, HTTPException, Depends
-from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy.orm import Session
-from fastapi.responses import StreamingResponse
-import shutil
-import os
-import json
 import csv
 import io
-from pydantic import BaseModel
-from typing import List
+import json
+import logging
+import os
+import tempfile
+from contextlib import asynccontextmanager
+from typing import Any
+
+from fastapi import (
+    FastAPI,
+    UploadFile,
+    File,
+    HTTPException,
+    Depends,
+)
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel, Field
+from sqlalchemy.orm import Session
 
 from database import SessionLocal, engine
 import models
@@ -17,24 +26,46 @@ from services.pdf_parser import extract_text_from_pdf
 from services import nlp_engine
 from services.scorer import calculate_lca_score, calculate_uiux_score
 
-# Create database tables
-models.Base.metadata.create_all(bind=engine)
+# --------------------------------------------------
+# CONFIGURATION
+# --------------------------------------------------
 
-app = FastAPI(title="GFI Resume Screener API")
+logger = logging.getLogger(__name__)
 
-# CORS Middleware
+MAX_PDF_SIZE = 10 * 1024 * 1024  # 10 MB
+
+# Safely parse allowed origins. Defaults to localhost for local dev.
+ALLOWED_ORIGINS = [
+    origin.strip()
+    for origin in (
+        os.getenv("ALLOWED_ORIGINS")
+        or os.getenv("FRONTEND_URL")
+        or "http://localhost:5173,http://localhost:5174,https://gfi-resume-screener.vercel.app"
+    ).split(",")
+    if origin.strip()
+]
+
+app = FastAPI(
+    title="GFI Resume Screener API",
+    version="1.0.0",
+)
+
+# --------------------------------------------------
+# CORS
+# --------------------------------------------------
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=["*"], # Temporary: allow all for deployment debugging
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-UPLOAD_DIR = "uploads"
-os.makedirs(UPLOAD_DIR, exist_ok=True)
+# --------------------------------------------------
+# DATABASE DEPENDENCY
+# --------------------------------------------------
 
-# Database Dependency
 def get_db():
     db = SessionLocal()
     try:
@@ -42,120 +73,222 @@ def get_db():
     finally:
         db.close()
 
+# --------------------------------------------------
+# STARTUP EVENT
+# --------------------------------------------------
+
+@app.on_event("startup")
+def startup():
+    # This creates the tables in PostgreSQL if they don't exist yet.
+    models.Base.metadata.create_all(bind=engine)
+
+# --------------------------------------------------
+# HEALTH CHECK (CRITICAL FOR RENDER)
+# --------------------------------------------------
+
 @app.get("/")
 def read_root():
-    return {"message": "API is running."}
+    return {
+        "message": "GFI Resume Screener API is running.",
+    }
+
+@app.get("/health")
+def health_check():
+    # Render pings this endpoint to ensure the app is alive.
+    # It must NEVER connect to the database.
+    return {"status": "healthy"}
+
+# --------------------------------------------------
+# HELPERS
+# --------------------------------------------------
+
+def get_candidate_skills(candidate):
+    if not candidate.extracted_skills:
+        return []
+    try:
+        skills = json.loads(candidate.extracted_skills)
+        return skills if isinstance(skills, list) else []
+    except (json.JSONDecodeError, TypeError):
+        return []
+
+def sanitize_filename(filename: str | None) -> str:
+    if not filename:
+        raise HTTPException(status_code=400, detail="A filename is required.")
+    safe_name = filename.replace("\\", "/").split("/")[-1].strip()
+    if not safe_name or safe_name in {".", ".."}:
+        raise HTTPException(status_code=400, detail="Invalid filename.")
+    if not safe_name.lower().endswith(".pdf"):
+        raise HTTPException(status_code=400, detail="Only PDF files are supported.")
+    return safe_name[:255]
+
+def csv_safe(value: Any) -> Any:
+    if isinstance(value, str) and value.startswith(("=", "+", "-", "@", "\t", "\r")):
+        return "'" + value
+    return value
+
+# --------------------------------------------------
+# RESUME ANALYSIS
+# --------------------------------------------------
 
 @app.post("/analyze-resume")
-async def analyze_resume(file: UploadFile = File(...), db: Session = Depends(get_db)):
-    if not file.filename.endswith(".pdf"):
-        raise HTTPException(status_code=400, detail="Only PDF files are supported.")
-    
-    # Check for duplicates
-    existing_candidate = db.query(models.Candidate).filter(models.Candidate.filename == file.filename).first()
-    if existing_candidate:
-        raise HTTPException(status_code=400, detail="This resume has already been processed.")
+async def analyze_resume(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+):
+    filename = sanitize_filename(file.filename)
+    temporary_path = None
 
-    file_path = os.path.join(UPLOAD_DIR, file.filename)
-    with open(file_path, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
+    try:
+        # Check for duplicates
+        existing_candidate = db.query(models.Candidate).filter(models.Candidate.filename == filename).first()
+        if existing_candidate:
+            raise HTTPException(status_code=400, detail="This resume filename has already been processed.")
+
+        # Save to temporary file
+        with tempfile.NamedTemporaryFile(mode="wb", suffix=".pdf", delete=False) as temporary_file:
+            temporary_path = temporary_file.name
+            total_size = 0
+            first_chunk = True
+
+            while True:
+                chunk = await file.read(1024 * 1024)
+                if not chunk:
+                    break
+                total_size += len(chunk)
+                if total_size > MAX_PDF_SIZE:
+                    raise HTTPException(status_code=413, detail="PDF exceeds the 10 MB upload limit.")
+                if first_chunk:
+                    if not chunk.startswith(b"%PDF-"):
+                        raise HTTPException(status_code=400, detail="The uploaded file is not a valid PDF.")
+                    first_chunk = False
+                temporary_file.write(chunk)
+
+        if total_size == 0:
+            raise HTTPException(status_code=400, detail="The uploaded PDF is empty.")
+
+        # Extract PDF text
+        extraction = extract_text_from_pdf(temporary_path)
+        if extraction.get("status") == "error":
+            raise HTTPException(status_code=400, detail=extraction.get("message", "Could not extract text from this PDF."))
+
+        raw_text = extraction.get("text", "")
+        if not raw_text or not raw_text.strip():
+            raise HTTPException(status_code=400, detail="No readable text was found in the PDF.")
+
+        # Extract skills
+        all_skills = list(dict.fromkeys(config.JD1_LCA["required_skills"] + config.JD2_UIUX["required_skills"]))
         
-    extraction = extract_text_from_pdf(file_path)
-    if extraction["status"] == "error":
-        os.remove(file_path) 
-        raise HTTPException(status_code=400, detail=extraction["message"])
+        candidate_data = {
+            "raw_text": raw_text,
+            "skills": nlp_engine.extract_skills(raw_text, all_skills),
+            "experience_years": nlp_engine.extract_experience(raw_text),
+            "education": nlp_engine.extract_education(raw_text),
+            "has_projects": nlp_engine.extract_projects(raw_text),
+        }
 
-    raw_text = extraction["text"]
-    all_skills = list(set(config.JD1_LCA["required_skills"] + config.JD2_UIUX["required_skills"]))
-    
-    candidate_data = {
-        "raw_text": raw_text,
-        "skills": nlp_engine.extract_skills(raw_text, all_skills),
-        "experience_years": nlp_engine.extract_experience(raw_text),
-        "education": nlp_engine.extract_education(raw_text),
-        "has_projects": nlp_engine.extract_projects(raw_text)
-    }
+        scorer_data = {
+            "skills": candidate_data["skills"],
+            "experience_years": candidate_data["experience_years"],
+            "education": candidate_data["education"],
+            "projects": candidate_data["has_projects"],
+            "raw_text": candidate_data["raw_text"],
+        }
 
-    scorer_data = {
-        "skills": candidate_data["skills"],
-        "experience_years": candidate_data["experience_years"],
-        "education": candidate_data["education"],
-        "projects": candidate_data["has_projects"],
-        "raw_text": candidate_data["raw_text"]
-    }
-    
-    # Calculate Scores using the Dual-Engine
-    lca_score_data = calculate_lca_score(scorer_data)
-    uiux_score_data = calculate_uiux_score(scorer_data)
+        # Calculate scores
+        lca_score_data = calculate_lca_score(scorer_data)
+        uiux_score_data = calculate_uiux_score(scorer_data)
 
-    # Determine Classification based on Thresholds
-    lca_pass = lca_score_data["total_score"] >= 65
-    uiux_pass = uiux_score_data["total_score"] >= 65
+        lca_score = float(lca_score_data["total_score"])
+        uiux_score = float(uiux_score_data["total_score"])
 
-    if lca_pass and uiux_pass:
-        classification = "Both Roles"
-    elif lca_pass:
-        classification = "Strong Match for LCA"
-    elif uiux_pass:
-        classification = "Strong Match for UI/UX"
-    elif lca_score_data["total_score"] >= 50 or uiux_score_data["total_score"] >= 50:
-        classification = "Hold / Further Review"
-    else:
-        classification = "Not Recommended"
+        # Classification
+        lca_pass = lca_score >= 65
+        uiux_pass = uiux_score >= 65
 
-    # SAVE TO DATABASE
-    new_candidate = models.Candidate(
-        filename=file.filename,
-        raw_text=raw_text,
-        extracted_skills=json.dumps(candidate_data["skills"]),
-        education=candidate_data["education"],
-        experience_years=candidate_data["experience_years"],
-        lca_score=lca_score_data["total_score"],
-        uiux_score=uiux_score_data["total_score"],
-        classification=classification,
-        hr_status="Pending Review",
-        hr_notes=""
-    )
-    db.add(new_candidate)
-    db.commit()
-    db.refresh(new_candidate)
+        if lca_pass and uiux_pass:
+            classification = "Both Roles"
+        elif lca_pass:
+            classification = "Strong Match for LCA"
+        elif uiux_pass:
+            classification = "Strong Match for UI/UX"
+        elif lca_score >= 50 or uiux_score >= 50:
+            classification = "Hold / Further Review"
+        else:
+            classification = "Not Recommended"
 
-    return {
-        "id": new_candidate.id,
-        "filename": file.filename,
-        "classification": classification,
-        "lca_evaluation": lca_score_data,
-        "uiux_evaluation": uiux_score_data
-    }
+        # Save candidate
+        new_candidate = models.Candidate(
+            filename=filename,
+            raw_text=raw_text,
+            extracted_skills=json.dumps(candidate_data["skills"], ensure_ascii=False),
+            education=candidate_data["education"],
+            experience_years=candidate_data["experience_years"],
+            lca_score=lca_score,
+            uiux_score=uiux_score,
+            classification=classification,
+            hr_status="Pending Review",
+            hr_notes="",
+        )
+
+        db.add(new_candidate)
+        db.commit()
+        db.refresh(new_candidate)
+
+        return {
+            "id": new_candidate.id,
+            "filename": filename,
+            "classification": classification,
+            "lca_evaluation": lca_score_data,
+            "uiux_evaluation": uiux_score_data,
+        }
+
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception:
+        db.rollback()
+        logger.exception("Resume analysis failed")
+        raise HTTPException(status_code=500, detail="Resume analysis failed. Please check the server logs.")
+    finally:
+        await file.close()
+        if temporary_path and os.path.exists(temporary_path):
+            try:
+                os.remove(temporary_path)
+            except OSError:
+                pass
+
+# --------------------------------------------------
+# CANDIDATE ENDPOINTS
+# --------------------------------------------------
 
 @app.get("/candidates")
 def get_all_candidates(db: Session = Depends(get_db)):
-    candidates = db.query(models.Candidate).all()
-    result = []
-    for c in candidates:
-        result.append({
+    candidates = db.query(models.Candidate).order_by(models.Candidate.id.desc()).all()
+    return [
+        {
             "id": c.id,
             "filename": c.filename,
-            "skills": json.loads(c.extracted_skills) if c.extracted_skills else [],
+            "skills": get_candidate_skills(c),
             "education": c.education,
             "experience_years": c.experience_years,
             "lca_score": c.lca_score,
             "uiux_score": c.uiux_score,
             "classification": c.classification,
-            "hr_status": c.hr_status
-        })
-    return result
+            "hr_status": c.hr_status,
+        }
+        for c in candidates
+    ]
 
 @app.get("/candidates/{candidate_id}")
 def get_candidate_details(candidate_id: int, db: Session = Depends(get_db)):
     candidate = db.query(models.Candidate).filter(models.Candidate.id == candidate_id).first()
     if not candidate:
-        raise HTTPException(status_code=404, detail="Candidate not found")
+        raise HTTPException(status_code=404, detail="Candidate not found.")
         
     return {
         "id": candidate.id,
         "filename": candidate.filename,
-        "skills": json.loads(candidate.extracted_skills) if candidate.extracted_skills else [],
+        "skills": get_candidate_skills(candidate),
         "education": candidate.education,
         "experience_years": candidate.experience_years,
         "lca_score": candidate.lca_score,
@@ -163,32 +296,40 @@ def get_candidate_details(candidate_id: int, db: Session = Depends(get_db)):
         "classification": candidate.classification,
         "hr_status": candidate.hr_status,
         "hr_notes": candidate.hr_notes,
-        "raw_text_preview": candidate.raw_text[:1000] if candidate.raw_text else ""
+        "raw_text_preview": candidate.raw_text[:1000] if candidate.raw_text else "",
     }
 
-# --- HR REVIEW UPDATE ENDPOINT ---
+# --------------------------------------------------
+# HR REVIEW
+# --------------------------------------------------
+
 class HRReviewUpdate(BaseModel):
-    hr_status: str
-    hr_notes: str
+    hr_status: str = Field(min_length=1, max_length=100)
+    hr_notes: str = Field(default="", max_length=10000)
 
 @app.put("/candidates/{candidate_id}/review")
 def update_hr_review(candidate_id: int, review: HRReviewUpdate, db: Session = Depends(get_db)):
     candidate = db.query(models.Candidate).filter(models.Candidate.id == candidate_id).first()
     if not candidate:
-        raise HTTPException(status_code=404, detail="Candidate not found")
-    
-    candidate.hr_status = review.hr_status
-    candidate.hr_notes = review.hr_notes
-    db.commit()
-    db.refresh(candidate)
-    
-    return {"message": "Review saved successfully"}
+        raise HTTPException(status_code=404, detail="Candidate not found.")
+    try:
+        candidate.hr_status = review.hr_status
+        candidate.hr_notes = review.hr_notes
+        db.commit()
+        db.refresh(candidate)
+        return {"message": "Review saved successfully.", "id": candidate.id, "hr_status": candidate.hr_status}
+    except Exception:
+        db.rollback()
+        logger.exception("HR review update failed")
+        raise HTTPException(status_code=500, detail="Could not save HR review.")
 
-# --- JOB DESCRIPTION ENDPOINTS ---
+# --------------------------------------------------
+# JOB DESCRIPTION ENDPOINTS
+# --------------------------------------------------
 
 class JobCreate(BaseModel):
-    title: str
-    category: str
+    title: str = Field(min_length=1, max_length=255)
+    category: str = Field(min_length=1, max_length=100)
     description: str
     experience_level: str
     required_skills: str
@@ -200,9 +341,7 @@ class JobCreate(BaseModel):
 
 @app.get("/jobs")
 def get_jobs(db: Session = Depends(get_db)):
-    jobs = db.query(models.Job).all()
-    
-    # Seed default jobs if none exist
+    jobs = db.query(models.Job).order_by(models.Job.id.asc()).all()
     if not jobs:
         default_jobs = [
             models.Job(
@@ -230,13 +369,17 @@ def get_jobs(db: Session = Depends(get_db)):
                 preferred_skills="Portfolio of design projects, experience with sustainability platforms"
             )
         ]
-        db.add_all(default_jobs)
-        db.commit()
-        jobs = db.query(models.Job).all()
+        try:
+            db.add_all(default_jobs)
+            db.commit()
+            jobs = db.query(models.Job).order_by(models.Job.id.asc()).all()
+        except Exception:
+            db.rollback()
+            logger.exception("Default job seeding failed")
+            raise HTTPException(status_code=500, detail="Could not load job descriptions.")
 
-    result = []
-    for job in jobs:
-        result.append({
+    return [
+        {
             "id": job.id,
             "title": job.title,
             "category": job.category,
@@ -247,54 +390,74 @@ def get_jobs(db: Session = Depends(get_db)):
             "description": job.description,
             "responsibilities": job.responsibilities,
             "required_skills": job.required_skills,
-            "preferred_skills": job.preferred_skills
-        })
-    return result
+            "preferred_skills": job.preferred_skills,
+        }
+        for job in jobs
+    ]
 
 @app.post("/jobs")
 def create_job(job: JobCreate, db: Session = Depends(get_db)):
     new_job = models.Job(
-        title=job.title, 
-        category=job.category, 
+        title=job.title,
+        category=job.category,
         description=job.description,
-        experience_level=job.experience_level, 
+        experience_level=job.experience_level,
         required_skills=job.required_skills,
-        responsibilities=job.responsibilities, 
+        responsibilities=job.responsibilities,
         location=job.location,
-        work_type=job.work_type, 
-        compensation=job.compensation, 
-        preferred_skills=job.preferred_skills
+        work_type=job.work_type,
+        compensation=job.compensation,
+        preferred_skills=job.preferred_skills,
     )
-    db.add(new_job)
-    db.commit()
-    db.refresh(new_job)
-    return {"message": "Job created successfully", "id": new_job.id}
+    try:
+        db.add(new_job)
+        db.commit()
+        db.refresh(new_job)
+        return {"message": "Job created successfully.", "id": new_job.id}
+    except Exception:
+        db.rollback()
+        logger.exception("Job creation failed")
+        raise HTTPException(status_code=500, detail="Could not create job.")
 
 @app.delete("/jobs/{job_id}")
 def delete_job(job_id: int, db: Session = Depends(get_db)):
     job = db.query(models.Job).filter(models.Job.id == job_id).first()
     if not job:
-        raise HTTPException(status_code=404, detail="Job not found")
-    db.delete(job)
-    db.commit()
-    return {"message": "Job deleted successfully"}
+        raise HTTPException(status_code=404, detail="Job not found.")
+    try:
+        db.delete(job)
+        db.commit()
+        return {"message": "Job deleted successfully."}
+    except Exception:
+        db.rollback()
+        logger.exception("Job deletion failed")
+        raise HTTPException(status_code=500, detail="Could not delete job.")
 
-# --- REPORTS & EXPORT ENDPOINTS ---
+# --------------------------------------------------
+# CSV REPORT EXPORT
+# --------------------------------------------------
+
 @app.get("/reports/export/csv")
 def export_candidates_csv(db: Session = Depends(get_db)):
-    candidates = db.query(models.Candidate).all()
+    candidates = db.query(models.Candidate).order_by(models.Candidate.id.asc()).all()
     output = io.StringIO()
     writer = csv.writer(output)
-    
-    writer.writerow(["ID", "Filename", "Education", "Experience (Years)", "LCA Score", "UI/UX Score", "Classification", "HR Status", "HR Notes", "Extracted Skills"])
-    
+    writer.writerow([
+        "ID", "Filename", "Education", "Experience (Years)", 
+        "LCA Score", "UI/UX Score", "Classification", 
+        "HR Status", "HR Notes", "Extracted Skills"
+    ])
     for c in candidates:
-        skills = json.loads(c.extracted_skills) if c.extracted_skills else []
-        writer.writerow([c.id, c.filename, c.education, c.experience_years, c.lca_score, c.uiux_score, c.classification, c.hr_status, c.hr_notes, ", ".join(skills)])
-    
+        skills = get_candidate_skills(c)
+        writer.writerow([
+            c.id, csv_safe(c.filename or ""), csv_safe(c.education or ""),
+            c.experience_years, c.lca_score, c.uiux_score,
+            csv_safe(c.classification or ""), csv_safe(c.hr_status or ""),
+            csv_safe(c.hr_notes or ""), csv_safe(", ".join(skills))
+        ])
     output.seek(0)
     return StreamingResponse(
         iter([output.getvalue()]),
-        media_type="text/csv",
+        media_type="text/csv; charset=utf-8",
         headers={"Content-Disposition": "attachment; filename=candidate_report.csv"}
     )

@@ -12,7 +12,7 @@ export default function Results() {
   const navigate = useNavigate();
 
   useEffect(() => {
-    axios.get('http://127.0.0.1:8000/candidates').then(res => setCandidates(res.data));
+    axios.get('/candidates').then(res => setCandidates(res.data));
   }, []);
 
   // 1. Filter by Search
